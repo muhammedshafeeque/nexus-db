@@ -55,6 +55,12 @@ This machine is not logged into the Snap Store, so the upload step has to be don
 - **Import** from CSV / TSV / Excel (.xlsx, .xls, .xlsb) / ODS: target table picker (or new collection),
   column selection and column → column / key mapping with auto-matching, insert or upsert on chosen key
   columns, all-or-nothing transactions or skip-bad-rows, row-level error report, progress and cancel
+- **Column filters** in the results grid: a filter box per column (`text`, `!text`, `=x`, `>10`, `^start`, `end$`, `/regex/`, `null`, `a | b`)
+- **Database documentation** (PostgreSQL, MySQL / MariaDB, SQL Server, SQLite): every table and view with columns, types,
+  defaults, comments, primary / unique / foreign keys, indexes and both directions of each relation; export as HTML or
+  Markdown with a Mermaid ER diagram
+- **Dump / restore** (PostgreSQL, MySQL / MariaDB, MongoDB, SQLite) through `pg_dump` / `pg_restore` / `psql`, `mysqldump` /
+  `mysql`, `mongodump` / `mongorestore` and `sqlite3`, into a new or an existing database
 - Several result sets per script, row-limit control, query history
 - Connection manager: parameters or connection string, test button, SSL options,
   groups, colors, **read-only mode** (blocks statements that change data)

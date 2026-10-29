@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { CornerDownLeft, FilePlus2, Moon, Plus, Search, Sun, Upload } from "lucide-react";
+import { ArchiveRestore, CornerDownLeft, DatabaseBackup, FilePlus2, Moon, Plus, Search, Sun, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flavorOf } from "../lib/engines";
 import { useStore } from "../store";
@@ -51,6 +51,8 @@ export function CommandPalette() {
     const out: Item[] = [
       { id: "new-conn", group: "Actions", label: "New connection", icon: <Plus className="h-4 w-4" />, run: () => s.openDialog() },
       { id: "import", group: "Actions", label: "Import data from CSV / Excel…", icon: <Upload className="h-4 w-4" />, run: () => s.openImport() },
+      { id: "dump", group: "Actions", label: "Create database dump…", icon: <DatabaseBackup className="h-4 w-4" />, run: () => s.openDump("dump") },
+      { id: "restore", group: "Actions", label: "Restore dump to a database…", icon: <ArchiveRestore className="h-4 w-4" />, run: () => s.openDump("restore") },
       {
         id: "theme",
         group: "Actions",

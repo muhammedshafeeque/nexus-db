@@ -12,6 +12,7 @@ import {
   Download,
   Eye,
   FileSpreadsheet,
+  ListFilter,
   Lock,
   Pencil,
   Plus,
@@ -60,7 +61,7 @@ function toMarkdown(set: ResultSet): string {
   return [head, sep, ...rows].join("\n");
 }
 
-async function saveText(contents: string, name: string, ext: string) {
+export async function saveText(contents: string, name: string, ext: string) {
   if (isTauri) {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const path = await save({ defaultPath: `${name}.${ext}`, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] });
@@ -130,6 +131,10 @@ export function ResultsPanel({
 }) {
   const [view, setView] = useState<"grid" | "json">("grid");
   const [filter, setFilter] = useState("");
+  // kept across re-runs so a refreshed table stays filtered; only columns present apply
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [showColumnFilters, setShowColumnFilters] = useState(false);
+  const [shownRows, setShownRows] = useState<number | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [inspector, setInspector] = useState(true);
   const [preview, setPreview] = useState<string[] | null>(null);
@@ -214,6 +219,7 @@ export function ResultsPanel({
   }
 
   const hasGrid = set.columns.length > 0;
+  const activeColumnFilters = set.columns.filter((c) => columnFilters[c.name]?.trim()).length;
   const exportMenu = (e: React.MouseEvent) =>
     showContextMenu(e, [
       { label: "Export CSV", icon: <Download className="h-3.5 w-3.5" />, onSelect: () => saveText(toCsv(set), title, "csv").catch((x) => toast.error(errorText(x))) },
@@ -323,6 +329,25 @@ export function ResultsPanel({
               />
               {filter && <X className="h-3 w-3 text-faint hover:text-fg" onClick={() => setFilter("")} />}
             </div>
+            <button
+              title="Filter by column"
+              onClick={() => {
+                if (showColumnFilters) setColumnFilters({});
+                setShowColumnFilters((v) => !v);
+                setView("grid");
+              }}
+              className={clsx(
+                "relative grid h-7 w-7 place-items-center rounded-md hover:bg-hover",
+                showColumnFilters || activeColumnFilters ? "text-accent" : "text-muted",
+              )}
+            >
+              <ListFilter className="h-3.5 w-3.5" />
+              {activeColumnFilters > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-accent px-0.5 text-[9px] font-semibold text-white">
+                  {activeColumnFilters}
+                </span>
+              )}
+            </button>
             <div className="ml-1 flex rounded-md border border-line bg-panel-2 p-0.5">
               <button
                 onClick={() => setView("grid")}
@@ -366,7 +391,16 @@ export function ResultsPanel({
               </div>
             </div>
           ) : view === "grid" ? (
-            <DataGrid set={set} filter={filter} onSelect={setSelection} editing={gridEditing} />
+            <DataGrid
+              set={set}
+              filter={filter}
+              columnFilters={columnFilters}
+              onColumnFilters={setColumnFilters}
+              showColumnFilters={showColumnFilters}
+              onShownRows={setShownRows}
+              onSelect={setSelection}
+              editing={gridEditing}
+            />
           ) : (
             <CodeMirror value={jsonText} extensions={jsonExt} theme="none" height="100%" className="h-full overflow-auto text-[12px]" basicSetup={{ foldGutter: true, lineNumbers: true }} />
           )}
@@ -422,6 +456,11 @@ export function ResultsPanel({
       <div className="flex h-7 shrink-0 items-center gap-3 border-t border-line px-3 text-[11.5px] text-faint">
         {hasGrid && (
           <span>
+            {shownRows !== null && shownRows !== set.rows.length && (
+              <>
+                <span className="text-accent">{shownRows.toLocaleString()}</span> of{" "}
+              </>
+            )}
             <span className="text-muted">{set.rows.length.toLocaleString()}</span> rows · {set.columns.length} columns
           </span>
         )}

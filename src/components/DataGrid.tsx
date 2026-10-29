@@ -1,7 +1,8 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, Ban, Copy, CopyPlus, KeyRound, Pencil, Plus, RotateCcw, Trash2, Undo2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Ban, Copy, CopyPlus, Filter, KeyRound, Pencil, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { compileFilter, FILTER_HELP } from "../lib/colfilter";
 import { cellValue, editText, parseInput, withCell, withDeleted, withReverted } from "../lib/edits";
 import type { Cell, EditInfo, PendingEdits, ResultSet } from "../lib/types";
 import { showContextMenu, type MenuEntry } from "./ui";
@@ -56,11 +57,21 @@ export interface GridEditing {
 export function DataGrid({
   set,
   filter,
+  columnFilters,
+  onColumnFilters,
+  showColumnFilters = false,
+  onShownRows,
   onSelect,
   editing,
 }: {
   set: ResultSet;
   filter: string;
+  /** filter expression per column name (see lib/colfilter) */
+  columnFilters?: Record<string, string>;
+  onColumnFilters?: (f: Record<string, string>) => void;
+  showColumnFilters?: boolean;
+  /** number of loaded rows left after filtering */
+  onShownRows?: (n: number) => void;
   onSelect?: (s: Selection | null) => void;
   editing?: GridEditing | null;
 }) {
@@ -84,11 +95,17 @@ export function DataGrid({
     let idx = set.rows.map((_, i) => i);
     const f = filter.trim().toLowerCase();
     if (f) idx = idx.filter((i) => set.rows[i].some((v) => cellText(v).toLowerCase().includes(f)));
+    const tests = set.columns
+      .map((c, ci) => [ci, compileFilter(columnFilters?.[c.name] ?? "")] as const)
+      .filter((t) => t[1] !== null);
+    if (tests.length) idx = idx.filter((i) => tests.every(([ci, test]) => test!(set.rows[i][ci])));
     if (sort) idx.sort((a, b) => compare(set.rows[a][sort.col], set.rows[b][sort.col]) * sort.dir);
     // new rows always stay at the bottom
     for (let i = 0; i < inserted; i++) idx.push(base + i);
     return idx;
-  }, [set, filter, sort, inserted, base]);
+  }, [set, filter, columnFilters, sort, inserted, base]);
+
+  useEffect(() => onShownRows?.(order.length - inserted), [order, inserted]);
 
   const value = (row: number, col: number): Cell | undefined => cellValue(set, edits, row, col);
   const isDeleted = (row: number) => !!edits && row < base && row in edits.deletes;
@@ -258,15 +275,19 @@ export function DataGrid({
     window.addEventListener("mouseup", up);
   };
 
+  const activeFilters = set.columns.filter((c) => columnFilters?.[c.name]?.trim()).length;
+  const filtersShown = showColumnFilters || activeFilters > 0;
+
   const total = NUM_W + widths.reduce((a, b) => a + b, 0);
   const template = `${NUM_W}px ${widths.map((w) => `${w}px`).join(" ")}`;
 
   return (
     <div ref={scrollRef} tabIndex={0} onKeyDown={onKeyDown} className="relative h-full overflow-auto outline-none">
       <div style={{ width: Math.max(total, 0), minWidth: "100%" }}>
+        <div className="sticky top-0 z-10">
         {/* header */}
         <div
-          className="sticky top-0 z-10 grid border-b border-line bg-panel-2/95 backdrop-blur"
+          className="grid border-b border-line bg-panel-2/95 backdrop-blur"
           style={{ gridTemplateColumns: template, height: 34 }}
         >
           <div className="sticky left-0 z-10 border-r border-line bg-panel-2" />
@@ -299,6 +320,43 @@ export function DataGrid({
               </div>
             </div>
           ))}
+        </div>
+        {filtersShown && (
+          <div className="grid border-b border-line bg-panel-2/95 backdrop-blur" style={{ gridTemplateColumns: template, height: 30 }}>
+            <div className="sticky left-0 z-10 grid place-items-center border-r border-line bg-panel-2">
+              {activeFilters > 0 ? (
+                <button title="Clear column filters" onClick={() => onColumnFilters?.({})} className="grid h-5 w-5 place-items-center rounded text-accent hover:bg-hover">
+                  <X className="h-3 w-3" />
+                </button>
+              ) : (
+                <Filter className="h-3 w-3 text-faint" />
+              )}
+            </div>
+            {set.columns.map((c, i) => {
+              const v = columnFilters?.[c.name] ?? "";
+              return (
+                <div key={i} className="flex min-w-0 items-center border-r border-line px-1">
+                  <input
+                    value={v}
+                    onChange={(e) => onColumnFilters?.({ ...columnFilters, [c.name]: e.target.value })}
+                    onKeyDown={(e) => {
+                      // keep typing out of the grid's keyboard navigation / cell editing
+                      e.stopPropagation();
+                      if (e.key === "Escape") onColumnFilters?.({ ...columnFilters, [c.name]: "" });
+                    }}
+                    placeholder="filter…"
+                    title={`Filter ${c.name}: ${FILTER_HELP}`}
+                    spellCheck={false}
+                    className={clsx(
+                      "h-[22px] w-full min-w-0 rounded border bg-panel px-1.5 font-mono text-[11px] outline-none placeholder:text-faint/70 focus:border-accent/70",
+                      v.trim() ? "border-accent/50 text-fg" : "border-line text-muted",
+                    )}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
         </div>
         {/* body */}
         <div className="relative" style={{ height: virt.getTotalSize() }}>
@@ -378,8 +436,12 @@ export function DataGrid({
             );
           })}
         </div>
-        {order.length === inserted && set.rows.length > 0 && filter && (
-          <div className="p-6 text-center text-[12.5px] text-faint">No rows match “{filter}”</div>
+        {order.length === inserted && set.rows.length > 0 && (filter || activeFilters > 0) && (
+          <div className="p-6 text-center text-[12.5px] text-faint">
+            No rows match {filter ? `“${filter}”` : ""}
+            {filter && activeFilters > 0 ? " and " : ""}
+            {activeFilters > 0 ? `the column filter${activeFilters > 1 ? "s" : ""}` : ""}
+          </div>
         )}
       </div>
     </div>

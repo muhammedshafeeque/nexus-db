@@ -5,6 +5,7 @@ import { Group, Panel, Separator } from "react-resizable-panels";
 import { Toaster } from "sonner";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConnectionDialog } from "./components/ConnectionDialog";
+import { DumpDialog } from "./components/DumpDialog";
 import { EntraLogin } from "./components/EntraLogin";
 import { ImportDialog } from "./components/ImportDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -75,6 +76,7 @@ export default function App() {
       <StatusBar />
       <ConnectionDialog />
       <ImportDialog />
+      <DumpDialog />
       <EntraLogin />
       <CommandPalette />
       <ContextMenuHost />

@@ -2,7 +2,9 @@
 //! to Postgres, MongoDB or Redis through the same five calls.
 
 pub mod auth;
+pub mod dump;
 pub mod model;
+pub mod schemadoc;
 pub mod tabular;
 pub mod util;
 

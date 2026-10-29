@@ -337,6 +337,69 @@ impl ImportCtx<'_> {
     }
 }
 
+/// Database documentation: every table / view with its keys and relations.
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaDoc {
+    pub database: String,
+    pub tables: Vec<TableDoc>,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TableDoc {
+    pub schema: String,
+    pub name: String,
+    /// table | view | materialized view | foreign table
+    pub kind: String,
+    pub comment: Option<String>,
+    /// Estimated rows, where the catalog keeps a count.
+    pub rows: Option<i64>,
+    pub columns: Vec<ColumnDoc>,
+    pub primary_key: Vec<String>,
+    pub unique_keys: Vec<KeyDoc>,
+    pub foreign_keys: Vec<ForeignKeyDoc>,
+    pub indexes: Vec<IndexDoc>,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnDoc {
+    pub name: String,
+    pub type_name: String,
+    pub nullable: bool,
+    pub default: Option<String>,
+    pub comment: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyDoc {
+    pub name: String,
+    pub columns: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ForeignKeyDoc {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub ref_schema: String,
+    pub ref_table: String,
+    pub ref_columns: Vec<String>,
+    pub on_update: Option<String>,
+    pub on_delete: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexDoc {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub unique: bool,
+    pub primary: bool,
+}
+
 #[async_trait]
 pub trait Driver: Send + Sync {
     async fn server_info(&self) -> Result<ServerInfo>;
@@ -378,6 +441,11 @@ pub trait Driver: Send + Sync {
         _ctx: &ImportCtx<'_>,
     ) -> Result<ImportReport> {
         anyhow::bail!("Importing is not supported for this database.")
+    }
+
+    /// Tables, columns, keys and relations of a database (optionally one schema).
+    async fn schema_doc(&self, _database: Option<&str>, _schema: Option<&str>) -> Result<SchemaDoc> {
+        anyhow::bail!("Documentation is available for PostgreSQL, MySQL / MariaDB, SQL Server and SQLite.")
     }
 
     async fn close(&self) {}

@@ -143,6 +143,35 @@ impl Driver for SqliteDriver {
         Ok(self.run(&Self::columns_sql(table), 10_000).await?.pop().unwrap_or_default())
     }
 
+    async fn schema_doc(&self, _database: Option<&str>, _schema: Option<&str>) -> Result<SchemaDoc> {
+        let user = "m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite\\_%' ESCAPE '\\'";
+        let tables = format!("SELECT 'main', m.name, m.type, NULL, NULL FROM sqlite_master m WHERE {user} ORDER BY m.name");
+        let columns = format!(
+            "SELECT 'main', m.name, p.cid, p.name, p.type, NOT p.\"notnull\" AND p.pk = 0, p.dflt_value, NULL \
+             FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE {user} ORDER BY m.name, p.cid"
+        );
+        let constraints = format!(
+            "SELECT 'main', m.name, 'PRIMARY KEY', 'p', p.name, p.pk, NULL, NULL, NULL, NULL, NULL \
+             FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE {user} AND p.pk > 0 \
+             UNION ALL \
+             SELECT 'main', m.name, 'fk_' || m.name || '_' || f.id, 'f', f.\"from\", f.seq + 1, 'main', f.\"table\", f.\"to\", \
+               f.on_update, f.on_delete \
+             FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE {user} \
+             ORDER BY 2, 3, 6"
+        );
+        let indexes = format!(
+            "SELECT 'main', m.name, il.name, il.\"unique\", il.origin = 'pk', ii.name, ii.seqno \
+             FROM sqlite_master m JOIN pragma_index_list(m.name) il JOIN pragma_index_info(il.name) ii \
+             WHERE {user} ORDER BY m.name, il.name, ii.seqno"
+        );
+        let mut cat = Vec::new();
+        for sql in [tables, columns, constraints, indexes] {
+            cat.push(sqlcommon::strings(&self.run(&sql, 1_000_000).await?));
+        }
+        let [tables, columns, constraints, indexes] = <[_; 4]>::try_from(cat).unwrap();
+        Ok(crate::schemadoc::build("main", crate::schemadoc::Catalog { tables, columns, constraints, indexes }))
+    }
+
     async fn close(&self) {
         self.pool.close().await;
     }

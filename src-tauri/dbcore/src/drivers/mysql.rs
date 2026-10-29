@@ -259,6 +259,48 @@ impl Driver for MySqlDriver {
         Ok(self.run(&Self::columns_sql(db, table), &ctx).await?.pop().unwrap_or_default())
     }
 
+    async fn schema_doc(&self, database: Option<&str>, _schema: Option<&str>) -> Result<SchemaDoc> {
+        let db = database
+            .filter(|d| !d.is_empty())
+            .map(str::to_string)
+            .or_else(|| Some(self.cfg.database.trim().to_string()).filter(|d| !d.is_empty()))
+            .ok_or_else(|| anyhow::anyhow!("Choose a database to document"))?;
+        let lit = crate::util::sql_lit(&db);
+        let tables = format!(
+            "SELECT TABLE_SCHEMA, TABLE_NAME, CASE TABLE_TYPE WHEN 'VIEW' THEN 'view' ELSE 'table' END, TABLE_COMMENT, \
+             TABLE_ROWS FROM information_schema.TABLES WHERE TABLE_SCHEMA = {lit} ORDER BY TABLE_NAME"
+        );
+        let columns = format!(
+            "SELECT TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE = 'YES', \
+             COLUMN_DEFAULT, COLUMN_COMMENT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = {lit} \
+             ORDER BY TABLE_NAME, ORDINAL_POSITION"
+        );
+        let constraints = format!(
+            "SELECT k.TABLE_SCHEMA, k.TABLE_NAME, k.CONSTRAINT_NAME, \
+             CASE tc.CONSTRAINT_TYPE WHEN 'PRIMARY KEY' THEN 'p' WHEN 'UNIQUE' THEN 'u' ELSE 'f' END, \
+             k.COLUMN_NAME, k.ORDINAL_POSITION, k.REFERENCED_TABLE_SCHEMA, k.REFERENCED_TABLE_NAME, \
+             k.REFERENCED_COLUMN_NAME, rc.UPDATE_RULE, rc.DELETE_RULE \
+             FROM information_schema.KEY_COLUMN_USAGE k \
+             JOIN information_schema.TABLE_CONSTRAINTS tc ON tc.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA \
+               AND tc.TABLE_NAME = k.TABLE_NAME AND tc.CONSTRAINT_NAME = k.CONSTRAINT_NAME \
+             LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc ON rc.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA \
+               AND rc.TABLE_NAME = k.TABLE_NAME AND rc.CONSTRAINT_NAME = k.CONSTRAINT_NAME \
+             WHERE k.TABLE_SCHEMA = {lit} AND tc.CONSTRAINT_TYPE IN ('PRIMARY KEY', 'UNIQUE', 'FOREIGN KEY') \
+             ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION"
+        );
+        let indexes = format!(
+            "SELECT TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, NON_UNIQUE = 0, INDEX_NAME = 'PRIMARY', COLUMN_NAME, SEQ_IN_INDEX \
+             FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = {lit} ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX"
+        );
+        let cat = crate::schemadoc::Catalog {
+            tables: self.catalog(&tables).await?,
+            columns: self.catalog(&columns).await?,
+            constraints: self.catalog(&constraints).await?,
+            indexes: self.catalog(&indexes).await?,
+        };
+        Ok(crate::schemadoc::build(&db, cat))
+    }
+
     async fn close(&self) {
         for (_, pool) in self.pools.lock().await.drain() {
             pool.close().await;

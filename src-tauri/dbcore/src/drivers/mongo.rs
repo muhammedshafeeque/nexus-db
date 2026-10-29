@@ -23,27 +23,7 @@ pub struct MongoDriver {
 impl MongoDriver {
     pub async fn connect(cfg: &ConnectionConfig) -> Result<Self> {
         let entra = auth::token_source(cfg)?;
-        let uri = if cfg.has_url() {
-            cfg.url.trim().to_string()
-        } else {
-            let password_auth = !cfg.user.is_empty() && entra.is_none();
-            let auth = if password_auth {
-                format!("{}:{}@", urlencoding::encode(&cfg.user), urlencoding::encode(&cfg.password))
-            } else {
-                String::new()
-            };
-            let mut params = vec!["directConnection=true".to_string()];
-            if password_auth {
-                params.push("authSource=admin".into());
-            }
-            if cfg.ssl || entra.is_some() {
-                params.push("tls=true".into());
-            }
-            if cfg.trust_cert {
-                params.push("tlsAllowInvalidCertificates=true".into());
-            }
-            format!("mongodb://{auth}{}:{}/?{}", cfg.host_or_default(), cfg.port_or(27017), params.join("&"))
-        };
+        let uri = Self::uri(cfg, entra.is_some());
         let mut opts = ClientOptions::parse(&uri).await?;
         opts.app_name = Some("Nexus DB".into());
         opts.server_selection_timeout = Some(Duration::from_secs(10));
@@ -76,6 +56,30 @@ impl MongoDriver {
         let client = Client::with_options(opts)?;
         client.database("admin").run_command(doc! { "ping": 1 }).await?;
         Ok(Self { client, default_db })
+    }
+
+    /// Connection string for the driver and for mongodump / mongorestore.
+    pub fn uri(cfg: &ConnectionConfig, entra: bool) -> String {
+        if cfg.has_url() {
+            return cfg.url.trim().to_string();
+        }
+        let password_auth = !cfg.user.is_empty() && !entra;
+        let auth = if password_auth {
+            format!("{}:{}@", urlencoding::encode(&cfg.user), urlencoding::encode(&cfg.password))
+        } else {
+            String::new()
+        };
+        let mut params = vec!["directConnection=true".to_string()];
+        if password_auth {
+            params.push("authSource=admin".into());
+        }
+        if cfg.ssl || entra {
+            params.push("tls=true".into());
+        }
+        if cfg.trust_cert {
+            params.push("tlsAllowInvalidCertificates=true".into());
+        }
+        format!("mongodb://{auth}{}:{}/?{}", cfg.host_or_default(), cfg.port_or(27017), params.join("&"))
     }
 
     fn coll(&self, db: &str, name: &str) -> Collection<Document> {

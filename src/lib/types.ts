@@ -195,3 +195,87 @@ export interface XlsxSheet {
   columns: Column[];
   rows: Cell[][];
 }
+
+/** native = pg_dump custom archive, gzipped mongodump archive, SQLite database file */
+export type DumpFormat = "native" | "sql";
+
+export interface DumpOptions {
+  database: string;
+  path: string;
+  format: DumpFormat;
+  schemaOnly: boolean;
+  toolDir: string;
+}
+
+export interface RestoreOptions {
+  path: string;
+  /** target database; for SQLite the database file */
+  database: string;
+  create: boolean;
+  clean: boolean;
+  toolDir: string;
+}
+
+export interface ToolStatus {
+  name: string;
+  path?: string | null;
+  version?: string | null;
+}
+
+export interface DumpReport {
+  path: string;
+  bytes: number;
+  elapsedMs: number;
+  log: string[];
+}
+
+export interface RestoreReport {
+  database: string;
+  elapsedMs: number;
+  warnings: number;
+  log: string[];
+}
+
+export interface SchemaDoc {
+  database: string;
+  tables: TableDoc[];
+}
+
+export interface TableDoc {
+  schema: string;
+  name: string;
+  /** table | view | materialized view | foreign table */
+  kind: string;
+  comment?: string | null;
+  rows?: number | null;
+  columns: ColumnDoc[];
+  primaryKey: string[];
+  uniqueKeys: { name: string; columns: string[] }[];
+  foreignKeys: ForeignKeyDoc[];
+  indexes: IndexDoc[];
+}
+
+export interface ColumnDoc {
+  name: string;
+  typeName: string;
+  nullable: boolean;
+  default?: string | null;
+  comment?: string | null;
+}
+
+export interface ForeignKeyDoc {
+  name: string;
+  columns: string[];
+  refSchema: string;
+  refTable: string;
+  refColumns: string[];
+  onUpdate?: string | null;
+  onDelete?: string | null;
+}
+
+export interface IndexDoc {
+  name: string;
+  columns: string[];
+  unique: boolean;
+  primary: boolean;
+}

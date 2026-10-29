@@ -1,3 +1,4 @@
+use dbcore::dump;
 use dbcore::tabular::{self, FileOptions, Table, ValueOptions};
 use dbcore::{
     ApplyReport, ConnectionConfig, Driver, EditInfo, ExecContext, ImportCtx, ImportOptions, ImportReport, ObjectQuery, ResultSet,
@@ -336,6 +337,52 @@ fn import_cancel() {
 }
 
 #[tauri::command]
+async fn schema_doc(state: State<'_, AppState>, id: String, database: Option<String>, schema: Option<String>) -> CmdResult<dbcore::SchemaDoc> {
+    let driver = state.driver(&id).await?;
+    driver.schema_doc(database.as_deref().filter(|d| !d.is_empty()), schema.as_deref().filter(|s| !s.is_empty())).await.map_err(err)
+}
+
+static DUMP_CANCEL: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+async fn dump_tools(state: State<'_, AppState>, id: String, tool_dir: String) -> CmdResult<Vec<dump::ToolStatus>> {
+    let cfg = state.config(&id).await?;
+    Ok(dump::tools(cfg.engine, &tool_dir).await)
+}
+
+#[tauri::command]
+async fn dump_run(app: tauri::AppHandle, state: State<'_, AppState>, id: String, options: dump::DumpOptions) -> CmdResult<dump::DumpReport> {
+    let cfg = state.config(&id).await?;
+    let driver = state.driver(&id).await?;
+    DUMP_CANCEL.store(false, Ordering::Relaxed);
+    let log = move |line: &str| {
+        let _ = app.emit("dump-log", line);
+    };
+    let ctx = dump::JobCtx { log: &log, cancel: &DUMP_CANCEL };
+    dump::dump(&cfg, driver.as_ref(), &options, &ctx).await.map_err(err)
+}
+
+#[tauri::command]
+async fn restore_run(app: tauri::AppHandle, state: State<'_, AppState>, id: String, options: dump::RestoreOptions) -> CmdResult<dump::RestoreReport> {
+    let cfg = state.config(&id).await?;
+    if cfg.read_only {
+        return Err("This connection is read-only.".into());
+    }
+    let driver = state.driver(&id).await?;
+    DUMP_CANCEL.store(false, Ordering::Relaxed);
+    let log = move |line: &str| {
+        let _ = app.emit("dump-log", line);
+    };
+    let ctx = dump::JobCtx { log: &log, cancel: &DUMP_CANCEL };
+    dump::restore(&cfg, driver.as_ref(), &options, &ctx).await.map_err(err)
+}
+
+#[tauri::command]
+fn dump_cancel() {
+    DUMP_CANCEL.store(true, Ordering::Relaxed);
+}
+
+#[tauri::command]
 async fn write_text_file(path: String, contents: String) -> CmdResult<()> {
     std::fs::write(path, contents).map_err(|e| e.to_string())
 }
@@ -373,6 +420,11 @@ pub fn run() {
             import_preview,
             import_run,
             import_cancel,
+            dump_tools,
+            dump_run,
+            restore_run,
+            dump_cancel,
+            schema_doc,
             entra_cancel,
             entra_sign_out,
             open_url,

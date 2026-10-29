@@ -147,6 +147,23 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any>): Pro
         };
         return { query: queries[c.engine] ?? "SELECT 1", database: p[0], schema: c.engine === "postgres" || c.engine === "mssql" ? p[1] : null };
       }
+      case "schema_doc": {
+        const col = (name: string, typeName: string, nullable = false, def: string | null = null, comment: string | null = null) => ({ name, typeName, nullable, default: def, comment });
+        const fk = (name: string, columns: string[], refTable: string, refColumns: string[], onDelete: string | null = null) => ({ name, columns, refSchema: "public", refTable, refColumns, onUpdate: null, onDelete });
+        const ix = (name: string, columns: string[], unique = false, primary = false) => ({ name, columns, unique, primary });
+        const t = (name: string, kind: string, rows: number | null, comment: string | null, columns: unknown[], primaryKey: string[], foreignKeys: unknown[] = [], indexes: unknown[] = [], uniqueKeys: unknown[] = []) => ({ schema: args.schema ?? "public", name, kind, rows, comment, columns, primaryKey, foreignKeys, indexes, uniqueKeys });
+        return {
+          database: args.database ?? "shop",
+          tables: [
+            t("categories", "table", 24, "Product categories, nested by parent_id", [col("id", "integer", false, "nextval('categories_id_seq')"), col("parent_id", "integer", true), col("name", "text")], ["id"], [fk("categories_parent_fk", ["parent_id"], "categories", ["id"], "SET NULL")], [ix("categories_pkey", ["id"], true, true)]),
+            t("customers", "table", 1250, "People who placed at least one order", [col("id", "bigint", false, "nextval('customers_id_seq')"), col("full_name", "text"), col("email", "varchar(255)", false, null, "Login, unique"), col("preferences", "jsonb", true, "'{}'::jsonb"), col("created_at", "timestamptz", false, "now()")], ["id"], [], [ix("customers_pkey", ["id"], true, true), ix("customers_email_key", ["email"], true)], [{ name: "customers_email_key", columns: ["email"] }]),
+            t("order_items", "table", 48210, null, [col("order_id", "bigint"), col("line", "integer"), col("product_id", "integer"), col("quantity", "integer", false, "1"), col("unit_price", "numeric(10,2)")], ["order_id", "line"], [fk("order_items_order_fk", ["order_id"], "orders", ["id"], "CASCADE"), fk("order_items_product_fk", ["product_id"], "products", ["id"])], [ix("order_items_pkey", ["order_id", "line"], true, true), ix("order_items_product_idx", ["product_id"])]),
+            t("orders", "table", 9840, "One row per checkout", [col("id", "bigint", false, "nextval('orders_id_seq')"), col("customer_id", "bigint"), col("status", "text", false, "'new'"), col("total", "numeric(12,2)"), col("placed_at", "timestamptz", false, "now()")], ["id"], [fk("orders_customer_fk", ["customer_id"], "customers", ["id"], "RESTRICT")], [ix("orders_pkey", ["id"], true, true), ix("orders_customer_idx", ["customer_id"]), ix("orders_status_placed_idx", ["status", "placed_at"])]),
+            t("products", "table", 310, null, [col("id", "integer", false, "nextval('products_id_seq')"), col("category_id", "integer", true), col("sku", "text"), col("name", "text"), col("price", "numeric(10,2)")], ["id"], [fk("products_category_fk", ["category_id"], "categories", ["id"], "SET NULL")], [ix("products_pkey", ["id"], true, true), ix("products_sku_key", ["sku"], true)], [{ name: "products_sku_key", columns: ["sku"] }]),
+            t("revenue_by_month", "view", null, "Monthly totals for the dashboard", [col("month", "date", true), col("orders", "bigint", true), col("revenue", "numeric", true)], []),
+          ],
+        };
+      }
       case "describe":
         return {
           columns: ["column", "type", "nullable", "default", "primary_key"].map((name) => ({ name, typeName: "text" })),
@@ -185,6 +202,16 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, any>): Pro
       }
       case "import_run":
         return { written: 1247, failed: 3, errors: [{ row: 18, message: 'null value in column "email" violates not-null constraint' }, { row: 311, message: "duplicate key value violates unique constraint \"customers_email_key\"" }, { row: 902, message: 'invalid input syntax for type numeric: "n/a"' }], cancelled: false, rolledBack: false };
+      case "dump_tools": {
+        const c = connections.find((x) => x.id === args.id)!;
+        const names: Record<string, string[]> = { postgres: ["pg_dump", "pg_restore", "psql"], mysql: ["mysqldump", "mysql"], mongodb: ["mongodump", "mongorestore"], sqlite: ["sqlite3"] };
+        return (names[c.engine] ?? []).map((name) => ({ name, path: `/usr/bin/${name}`, version: `${name} (demo) 16.4` }));
+      }
+      case "dump_run":
+        return { path: args.options.path, bytes: 48_213_504, elapsedMs: 3820, log: [`$ pg_dump --verbose --format=custom`, "pg_dump: dumping contents of table \"public.customers\""] };
+      case "restore_run":
+        return { database: args.options.database, elapsedMs: 5210, warnings: 0, log: ["$ pg_restore --verbose --no-owner --no-privileges", "pg_restore: creating TABLE \"public.customers\""] };
+      case "dump_cancel":
       case "write_xlsx":
       case "import_cancel":
       case "write_text_file":

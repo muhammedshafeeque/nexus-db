@@ -272,6 +272,60 @@ impl Driver for PgDriver {
         Ok(sets.pop().unwrap_or_default())
     }
 
+    async fn schema_doc(&self, database: Option<&str>, schema: Option<&str>) -> Result<SchemaDoc> {
+        let db = database.filter(|d| !d.is_empty()).unwrap_or(&self.default_db).to_string();
+        let f = match schema {
+            Some(s) => format!("n.nspname = {}", sql_lit(s)),
+            None => "n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'".to_string(),
+        };
+        let rel = "c.relkind IN ('r','p','v','m','f') AND NOT c.relispartition";
+        let tables = format!(
+            "SELECT n.nspname, c.relname, CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' \
+             WHEN 'f' THEN 'foreign table' ELSE 'table' END, obj_description(c.oid, 'pg_class'), \
+             CASE WHEN c.relkind IN ('r','p') THEN c.reltuples::bigint END \
+             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE {rel} AND {f} ORDER BY 1, 2"
+        );
+        let columns = format!(
+            "SELECT n.nspname, c.relname, a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull, \
+             pg_get_expr(d.adbin, d.adrelid), col_description(c.oid, a.attnum) \
+             FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+             LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
+             WHERE {rel} AND a.attnum > 0 AND NOT a.attisdropped AND {f} ORDER BY 1, 2, 3"
+        );
+        let action = |col: &str| {
+            format!(
+                "CASE {col} WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' \
+                 WHEN 'd' THEN 'SET DEFAULT' END"
+            )
+        };
+        let constraints = format!(
+            "SELECT n.nspname, c.relname, con.conname, con.contype, a.attname, k.ord, rn.nspname, rc.relname, ra.attname, \
+             {}, {} FROM pg_constraint con \
+             JOIN pg_class c ON c.oid = con.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+             CROSS JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord) \
+             JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum \
+             LEFT JOIN pg_class rc ON rc.oid = con.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace \
+             LEFT JOIN pg_attribute ra ON ra.attrelid = con.confrelid AND ra.attnum = con.confkey[k.ord] \
+             WHERE con.contype IN ('p','u','f') AND {f} ORDER BY 1, 2, 3, 6",
+            action("con.confupdtype"),
+            action("con.confdeltype")
+        );
+        let indexes = format!(
+            "SELECT n.nspname, c.relname, i.relname, ix.indisunique, ix.indisprimary, \
+             pg_get_indexdef(ix.indexrelid, k.ord, true), k.ord \
+             FROM pg_index ix JOIN pg_class i ON i.oid = ix.indexrelid JOIN pg_class c ON c.oid = ix.indrelid \
+             JOIN pg_namespace n ON n.oid = c.relnamespace CROSS JOIN LATERAL generate_series(1, ix.indnatts) AS k(ord) \
+             WHERE {f} ORDER BY 1, 2, 3, 7"
+        );
+        let cat = crate::schemadoc::Catalog {
+            tables: self.catalog(Some(&db), &tables).await?,
+            columns: self.catalog(Some(&db), &columns).await?,
+            constraints: self.catalog(Some(&db), &constraints).await?,
+            indexes: self.catalog(Some(&db), &indexes).await?,
+        };
+        Ok(crate::schemadoc::build(&db, cat))
+    }
+
     async fn close(&self) {
         for (_, pool) in self.pools.lock().await.drain() {
             pool.close().await;

@@ -1,6 +1,9 @@
 import clsx from "clsx";
 import {
+  ArchiveRestore,
+  BookOpen,
   ChevronRight,
+  DatabaseBackup,
   Copy,
   FilePlus2,
   Pencil,
@@ -26,6 +29,10 @@ import { nodeKey, useStore } from "../store";
 import { EngineBadge, IconButton, NodeIcon, showContextMenu, Spinner, type MenuEntry } from "./ui";
 
 const OPENABLE = new Set(["table", "view", "collection", "edge", "key"]);
+/** engines whose catalog the documentation tab reads */
+const DOCUMENTED = new Set(["postgres", "mysql", "mssql", "sqlite"]);
+/** engines with dump / restore (see DumpDialog) */
+const DUMPABLE = new Set(["postgres", "mysql", "mongodb", "sqlite"]);
 
 export function Sidebar() {
   const connections = useStore((s) => s.connections);
@@ -93,16 +100,33 @@ function ConnectionItem({ conn }: { conn: ConnectionConfig }) {
   const live = useStore((s) => s.live[conn.id]);
   const expanded = useStore((s) => !!s.expanded[nodeKey(conn.id, [])]);
   const loading = useStore((s) => !!s.loading[nodeKey(conn.id, [])]);
-  const { toggleNode, openQueryTab, openDialog, disconnect, deleteConnection, loadChildren, openImport } = useStore.getState();
+  const { toggleNode, openQueryTab, openDialog, disconnect, deleteConnection, loadChildren, openImport, openDump, openDocs } = useStore.getState();
   const f = flavorOf(conn.engine, conn.flavor);
 
   const status = live?.status;
   const menu: MenuEntry[] = [
     { label: "New query", icon: <FilePlus2 className="h-3.5 w-3.5" />, shortcut: "Ctrl T", onSelect: () => openQueryTab(conn.id) },
     { label: "Refresh", icon: <RefreshCw className="h-3.5 w-3.5" />, onSelect: () => loadChildren(conn.id, [], true) },
+    ...(conn.engine === "sqlite" || (DOCUMENTED.has(conn.engine) && conn.database.trim())
+      ? ([
+          {
+            label: "Database documentation",
+            icon: <BookOpen className="h-3.5 w-3.5" />,
+            onSelect: () => void openDocs(conn.id, conn.engine === "sqlite" ? null : conn.database.trim()),
+          },
+        ] as MenuEntry[])
+      : []),
     ...(conn.readOnly
       ? []
       : ([{ label: "Import data…", icon: <Upload className="h-3.5 w-3.5" />, onSelect: () => openImport(conn.id, []) }] as MenuEntry[])),
+    ...(DUMPABLE.has(conn.engine)
+      ? ([
+          { label: "Create dump…", icon: <DatabaseBackup className="h-3.5 w-3.5" />, onSelect: () => openDump("dump", conn.id) },
+          ...(conn.readOnly
+            ? []
+            : [{ label: "Restore dump…", icon: <ArchiveRestore className="h-3.5 w-3.5" />, onSelect: () => openDump("restore", conn.id) }]),
+        ] as MenuEntry[])
+      : []),
     "separator",
     { label: "Edit connection", icon: <Pencil className="h-3.5 w-3.5" />, onSelect: () => openDialog(conn) },
     { label: "Duplicate", icon: <Copy className="h-3.5 w-3.5" />, onSelect: () => openDialog({ ...conn, id: "", name: `${conn.name} copy` }) },
@@ -287,7 +311,9 @@ function TreeRow({ connId, node, depth, highlight }: { connId: string; node: Tre
   const expanded = useStore((s) => !!s.expanded[key]);
   const loading = useStore((s) => !!s.loading[key]);
   const readOnly = useStore((s) => !!s.connections.find((c) => c.id === connId)?.readOnly);
-  const { toggleNode, openObject, openStructure, openQueryTab, loadChildren, openImport } = useStore.getState();
+  const engine = useStore((s) => s.connections.find((c) => c.id === connId)?.engine);
+  const { toggleNode, openObject, openStructure, openQueryTab, loadChildren, openImport, openDump, openDocs } = useStore.getState();
+  const dumpable = node.kind === "database" && !!engine && DUMPABLE.has(engine);
   const openable = OPENABLE.has(node.kind);
   const importable = !readOnly && ["table", "collection", "edge", "database", "schema"].includes(node.kind);
 
@@ -313,6 +339,23 @@ function TreeRow({ connId, node, depth, highlight }: { connId: string; node: Tre
       : []),
     ...(importable
       ? ([{ label: "Import data…", icon: <Upload className="h-3.5 w-3.5" />, onSelect: () => openImport(connId, node.path) }] as MenuEntry[])
+      : []),
+    ...((node.kind === "database" || node.kind === "schema") && !!engine && DOCUMENTED.has(engine)
+      ? ([
+          {
+            label: node.kind === "schema" ? "Schema documentation" : "Database documentation",
+            icon: <BookOpen className="h-3.5 w-3.5" />,
+            onSelect: () => void openDocs(connId, node.path[0], node.kind === "schema" ? node.name : null),
+          },
+        ] as MenuEntry[])
+      : []),
+    ...(dumpable
+      ? ([
+          { label: "Dump database…", icon: <DatabaseBackup className="h-3.5 w-3.5" />, onSelect: () => openDump("dump", connId, node.name) },
+          ...(readOnly
+            ? []
+            : [{ label: "Restore dump into…", icon: <ArchiveRestore className="h-3.5 w-3.5" />, onSelect: () => openDump("restore", connId, node.name) }]),
+        ] as MenuEntry[])
       : []),
     { label: "Copy name", icon: <Copy className="h-3.5 w-3.5" />, onSelect: () => navigator.clipboard.writeText(node.name) },
     ...(node.expandable

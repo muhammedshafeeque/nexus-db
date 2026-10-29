@@ -273,6 +273,76 @@ impl Driver for MssqlDriver {
         res
     }
 
+    async fn schema_doc(&self, database: Option<&str>, schema: Option<&str>) -> Result<SchemaDoc> {
+        let ctx = ExecContext { database: database.map(str::to_string), limit: 100_000, ..Default::default() };
+        let q = |sql: String| {
+            let ctx = ctx.clone();
+            async move { Ok::<_, anyhow::Error>(super::sqlcommon::strings(&self.run(&sql, &ctx).await?)) }
+        };
+        let db = super::sqlcommon::first_value(&self.run("SELECT DB_NAME()", &ctx).await?);
+        let f = schema.map(|s| format!(" AND s.name = {}", crate::util::sql_lit(s))).unwrap_or_default();
+        let user = "o.type IN ('U','V') AND o.is_ms_shipped = 0";
+        let tables = format!(
+            "SELECT s.name, o.name, CASE o.type WHEN 'V' THEN 'view' ELSE 'table' END, CAST(ep.value AS nvarchar(max)), \
+             (SELECT SUM(p.rows) FROM sys.partitions p WHERE p.object_id = o.object_id AND p.index_id IN (0, 1) AND o.type = 'U') \
+             FROM sys.objects o JOIN sys.schemas s ON s.schema_id = o.schema_id \
+             LEFT JOIN sys.extended_properties ep ON ep.class = 1 AND ep.major_id = o.object_id AND ep.minor_id = 0 \
+               AND ep.name = 'MS_Description' \
+             WHERE {user}{f} ORDER BY 1, 2"
+        );
+        let columns = format!(
+            "SELECT s.name, o.name, c.column_id, c.name, t.name + CASE \
+               WHEN t.name IN ('varchar', 'char', 'varbinary', 'binary') \
+                 THEN '(' + CASE WHEN c.max_length = -1 THEN 'max' ELSE CAST(c.max_length AS varchar(10)) END + ')' \
+               WHEN t.name IN ('nvarchar', 'nchar') \
+                 THEN '(' + CASE WHEN c.max_length = -1 THEN 'max' ELSE CAST(c.max_length / 2 AS varchar(10)) END + ')' \
+               WHEN t.name IN ('decimal', 'numeric') \
+                 THEN '(' + CAST(c.precision AS varchar(10)) + ',' + CAST(c.scale AS varchar(10)) + ')' \
+               ELSE '' END + CASE WHEN c.is_identity = 1 THEN ' identity' ELSE '' END, \
+             c.is_nullable, dc.definition, CAST(ep.value AS nvarchar(max)) \
+             FROM sys.columns c JOIN sys.objects o ON o.object_id = c.object_id JOIN sys.schemas s ON s.schema_id = o.schema_id \
+             JOIN sys.types t ON t.user_type_id = c.user_type_id \
+             LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id \
+             LEFT JOIN sys.extended_properties ep ON ep.class = 1 AND ep.major_id = c.object_id AND ep.minor_id = c.column_id \
+               AND ep.name = 'MS_Description' \
+             WHERE {user}{f} ORDER BY 1, 2, 3"
+        );
+        let constraints = format!(
+            "SELECT s.name, t.name, kc.name, CASE kc.type WHEN 'PK' THEN 'p' ELSE 'u' END, c.name, ic.key_ordinal, \
+               NULL, NULL, NULL, NULL, NULL \
+             FROM sys.key_constraints kc JOIN sys.tables t ON t.object_id = kc.parent_object_id \
+             JOIN sys.schemas s ON s.schema_id = t.schema_id \
+             JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id \
+             JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id \
+             WHERE t.is_ms_shipped = 0{f} \
+             UNION ALL \
+             SELECT s.name, t.name, fk.name, 'f', c.name, fkc.constraint_column_id, rs.name, rt.name, rc.name, \
+               fk.update_referential_action_desc, fk.delete_referential_action_desc \
+             FROM sys.foreign_keys fk JOIN sys.tables t ON t.object_id = fk.parent_object_id \
+             JOIN sys.schemas s ON s.schema_id = t.schema_id \
+             JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id \
+             JOIN sys.columns c ON c.object_id = fkc.parent_object_id AND c.column_id = fkc.parent_column_id \
+             JOIN sys.tables rt ON rt.object_id = fk.referenced_object_id JOIN sys.schemas rs ON rs.schema_id = rt.schema_id \
+             JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id \
+             WHERE t.is_ms_shipped = 0{f} \
+             ORDER BY 1, 2, 3, 6"
+        );
+        let indexes = format!(
+            "SELECT s.name, o.name, i.name, i.is_unique, i.is_primary_key, c.name, ic.key_ordinal \
+             FROM sys.indexes i JOIN sys.objects o ON o.object_id = i.object_id JOIN sys.schemas s ON s.schema_id = o.schema_id \
+             JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id \
+             JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id \
+             WHERE {user} AND i.name IS NOT NULL AND ic.is_included_column = 0{f} ORDER BY 1, 2, 3, 7"
+        );
+        let cat = crate::schemadoc::Catalog {
+            tables: q(tables).await?,
+            columns: q(columns).await?,
+            constraints: q(constraints).await?,
+            indexes: q(indexes).await?,
+        };
+        Ok(crate::schemadoc::build(&db, cat))
+    }
+
     async fn describe(&self, path: &[String]) -> Result<ResultSet> {
         let [db, schema, table, ..] = path else { bail!("Select a table or view") };
         let ctx = ExecContext { limit: 10_000, ..Default::default() };

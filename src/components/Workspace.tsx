@@ -1,8 +1,9 @@
 import clsx from "clsx";
-import { Command, FileCode2, Info, Plus, X, Zap } from "lucide-react";
+import { BookOpen, Command, FileCode2, Info, Plus, X, Zap } from "lucide-react";
 import { FLAVORS, flavorOf } from "../lib/engines";
 import { useStore, type Tab } from "../store";
 import { DataGrid } from "./DataGrid";
+import { DocsView } from "./DocsView";
 import { QueryTab } from "./QueryTab";
 import { EngineBadge, Kbd, showContextMenu, Spinner } from "./ui";
 import { newConnection } from "../store";
@@ -20,6 +21,8 @@ export function Workspace() {
           // keep each tab's editor state by keying on id
           active.kind === "query" ? (
             <QueryTab key={active.id} tab={active} />
+          ) : active.kind === "docs" ? (
+            <DocsView key={active.id} tab={active} />
           ) : (
             <StructureView key={active.id} tab={active} />
           )
@@ -69,6 +72,8 @@ function TabBar({ tabs, activeId }: { tabs: Tab[]; activeId: string | null }) {
             )}
             {t.kind === "structure" ? (
               <Info className="h-3.5 w-3.5 shrink-0 text-accent-2" />
+            ) : t.kind === "docs" ? (
+              <BookOpen className="h-3.5 w-3.5 shrink-0 text-accent" />
             ) : conn ? (
               <EngineBadge engine={conn.engine} flavor={conn.flavor} size={15} />
             ) : (

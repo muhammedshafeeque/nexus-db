@@ -3,11 +3,11 @@ import { toast } from "sonner";
 import { api, errorText } from "./lib/api";
 import { EMPTY_ENTRA, ENGINE_META, flavorOf } from "./lib/engines";
 import { buildChanges, emptyEdits, pendingCount, reattach, withoutApplied } from "./lib/edits";
-import type { ApplyReport, ConnectionConfig, EditInfo, ExecResponse, PendingEdits, ResultSet, TreeNode } from "./lib/types";
+import type { ApplyReport, ConnectionConfig, EditInfo, ExecResponse, PendingEdits, ResultSet, SchemaDoc, TreeNode } from "./lib/types";
 
 export interface Tab {
   id: string;
-  kind: "query" | "structure";
+  kind: "query" | "structure" | "docs";
   title: string;
   connId: string;
   database?: string | null;
@@ -16,6 +16,7 @@ export interface Tab {
   path?: string[];
   result?: ExecResponse;
   structure?: ResultSet;
+  docs?: SchemaDoc;
   error?: string;
   running: boolean;
   activeSet: number;
@@ -58,6 +59,7 @@ interface State {
   dialog: { open: boolean; editing: ConnectionConfig | null };
   paletteOpen: boolean;
   importDialog: { open: boolean; connId?: string; path?: string[] };
+  dumpDialog: { open: boolean; mode: DumpMode; connId?: string; database?: string };
 
   loadConnections(): Promise<void>;
   saveConnection(c: ConnectionConfig): Promise<ConnectionConfig>;
@@ -69,6 +71,8 @@ interface State {
   openQueryTab(connId: string, opts?: Partial<Pick<Tab, "query" | "database" | "schema" | "title" | "source">>, run?: boolean): string;
   openObject(connId: string, path: string[]): Promise<void>;
   openStructure(connId: string, path: string[]): Promise<void>;
+  openDocs(connId: string, database?: string | null, schema?: string | null): Promise<void>;
+  loadDocs(tabId: string): Promise<void>;
   closeTab(id: string): void;
   closeOtherTabs(id: string): void;
   setActive(id: string): void;
@@ -84,7 +88,11 @@ interface State {
   saveEdits(tabId: string, dryRun?: boolean): Promise<ApplyReport | null>;
   openImport(connId?: string, path?: string[]): void;
   closeImport(): void;
+  openDump(mode: DumpMode, connId?: string, database?: string): void;
+  closeDump(): void;
 }
+
+export type DumpMode = "dump" | "restore";
 
 export const nodeKey = (connId: string, path: string[]) => [connId, ...path].join("\u001f");
 
@@ -123,6 +131,7 @@ export const useStore = create<State>((set, get) => ({
   dialog: { open: false, editing: null },
   paletteOpen: false,
   importDialog: { open: false },
+  dumpDialog: { open: false, mode: "dump" },
 
   async loadConnections() {
     try {
@@ -256,6 +265,45 @@ export const useStore = create<State>((set, get) => ({
       get().updateTab(id, { structure, running: false });
     } catch (e) {
       get().updateTab(id, { error: errorText(e), running: false });
+    }
+  },
+
+  async openDocs(connId, database, schema) {
+    const existing = get().tabs.find((t) => t.kind === "docs" && t.connId === connId && (t.database ?? null) === (database ?? null) && (t.schema ?? null) === (schema ?? null));
+    if (existing) {
+      set({ activeTabId: existing.id });
+      return;
+    }
+    const conn = get().connections.find((c) => c.id === connId);
+    const id = uid();
+    const tab: Tab = {
+      id,
+      kind: "docs",
+      title: `Docs · ${schema ?? database ?? conn?.name ?? "database"}`,
+      connId,
+      database: database ?? null,
+      schema: schema ?? null,
+      query: "",
+      running: true,
+      activeSet: 0,
+    };
+    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
+    await get().loadDocs(id);
+  },
+
+  async loadDocs(tabId) {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    get().updateTab(tabId, { running: true, error: undefined });
+    try {
+      if (!(await get().connect(tab.connId))) {
+        get().updateTab(tabId, { error: "Could not connect.", running: false });
+        return;
+      }
+      const docs = await api.schemaDoc(tab.connId, tab.database, tab.schema);
+      get().updateTab(tabId, { docs, running: false });
+    } catch (e) {
+      get().updateTab(tabId, { error: errorText(e), running: false });
     }
   },
 
@@ -406,6 +454,14 @@ export const useStore = create<State>((set, get) => ({
 
   closeImport() {
     set({ importDialog: { open: false } });
+  },
+
+  openDump(mode, connId, database) {
+    set({ dumpDialog: { open: true, mode, connId, database } });
+  },
+
+  closeDump() {
+    set((s) => ({ dumpDialog: { ...s.dumpDialog, open: false } }));
   },
 }));
 
