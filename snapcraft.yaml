@@ -1,0 +1,35 @@
+name: nexus-db
+title: Nexus DB
+base: core26
+version: "0.1.0"
+summary: One desktop client for PostgreSQL, MySQL, MongoDB, Redis, and more
+description: |
+  Nexus DB is a desktop database client for PostgreSQL, MySQL, SQLite,
+  SQL Server, MongoDB, ArangoDB, Redis, ClickHouse, and Elasticsearch.
+grade: stable
+confinement: strict
+compression: xz
+
+platforms:
+  amd64:
+    build-on: [amd64]
+    build-for: [amd64]
+
+apps:
+  nexus-db:
+    command: usr/bin/nexus-db
+    desktop: usr/share/applications/nexus-db.desktop
+    extensions: [gnome]
+    plugs:
+      - network
+      - network-bind
+      - home
+      - removable-media
+      - audio-playback
+      - browser-support
+      - gsettings
+
+parts:
+  nexus-db:
+    plugin: dump
+    source: snap/local

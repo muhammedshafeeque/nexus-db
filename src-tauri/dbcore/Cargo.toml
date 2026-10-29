@@ -1,0 +1,32 @@
+[package]
+name = "dbcore"
+version = "0.1.0"
+edition = "2021"
+description = "Unified driver layer for Nexus DB"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+json5 = "0.4"
+regex = "1"
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+urlencoding = "2"
+
+# rustls everywhere (ring provider) so no OpenSSL / cmake is needed
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "mysql", "sqlite"] }
+tiberius = { version = "0.12", default-features = false, features = ["tds73", "rustls", "chrono"] }
+mongodb = "3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "aio", "tokio-rustls-comp", "tls-rustls-webpki-roots", "tls-rustls-insecure"] }
+calamine = { version = "0.37.0", features = ["dates"] }
+rust_xlsxwriter = { version = "0.101.0", default-features = false }
+csv = "1.4.0"
+encoding_rs = "0.8.42"

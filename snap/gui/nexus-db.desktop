@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Nexus DB
+Comment=One client for every database
+Exec=nexus-db
+Icon=${SNAP}/meta/gui/icon.png
+StartupWMClass=nexus-db
+Terminal=false
+Type=Application
+Categories=Development;Database;
